@@ -1,0 +1,11 @@
+yfinance
+beautifulsoup4
+requests
+pandas
+flask
+flask-cors
+gunicorn
+apscheduler
+lxml
+openai
+python-dotenv

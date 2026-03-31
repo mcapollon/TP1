@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: tp1-stock-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
