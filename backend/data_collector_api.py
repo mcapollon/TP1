@@ -1,5 +1,5 @@
 """
-data_collector_api.py — Approche 1 : Collecte de données via API (yfinance + Alpha Vantage).
+data_collector_api.py — Approche 1 : Collecte de données via API (yfinance).
 
 Données collectées :
 - Nom de l'action (symbole)
@@ -23,7 +23,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ALPHA_VANTAGE_API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY", "")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -140,82 +139,6 @@ def search_stocks_yfinance(query: str) -> list[dict]:
             pass
 
     return results
-
-
-# ─── Alpha Vantage ──────────────────────────────────────────────────────────────
-
-def get_stock_info_alpha_vantage(symbol: str) -> dict:
-    """Récupère les données d'une action via Alpha Vantage API."""
-    if not ALPHA_VANTAGE_API_KEY:
-        return {"error": "Alpha Vantage API key not configured"}
-
-    url = "https://www.alphavantage.co/query"
-    params = {
-        "function": "GLOBAL_QUOTE",
-        "symbol": symbol.upper(),
-        "apikey": ALPHA_VANTAGE_API_KEY,
-    }
-
-    response = requests.get(url, params=params, timeout=10)
-    response.raise_for_status()
-    data = response.json()
-
-    quote = data.get("Global Quote", {})
-    if not quote:
-        return {"error": f"No data found for {symbol}"}
-
-    price = float(quote.get("05. price", 0))
-    prev_close = float(quote.get("08. previous close", 0))
-
-    return {
-        "symbol": quote.get("01. symbol", symbol.upper()),
-        "current_price": price,
-        "open": float(quote.get("02. open", 0)),
-        "day_high": float(quote.get("03. high", 0)),
-        "day_low": float(quote.get("04. low", 0)),
-        "volume": int(quote.get("06. volume", 0)),
-        "previous_close": prev_close,
-        "change_percent": _calc_change_percent(price, prev_close),
-        "latest_trading_day": quote.get("07. latest trading day"),
-        "timestamp": datetime.now().isoformat(),
-        "source": "alpha_vantage",
-    }
-
-
-def get_historical_alpha_vantage(
-    symbol: str, outputsize: str = "compact"
-) -> list[dict]:
-    """
-    Récupère les données historiques via Alpha Vantage.
-    outputsize: compact (100 derniers jours) ou full (20+ ans)
-    """
-    if not ALPHA_VANTAGE_API_KEY:
-        return []
-
-    url = "https://www.alphavantage.co/query"
-    params = {
-        "function": "TIME_SERIES_DAILY",
-        "symbol": symbol.upper(),
-        "outputsize": outputsize,
-        "apikey": ALPHA_VANTAGE_API_KEY,
-    }
-
-    response = requests.get(url, params=params, timeout=15)
-    response.raise_for_status()
-    data = response.json()
-
-    time_series = data.get("Time Series (Daily)", {})
-    records = []
-    for date_str, values in sorted(time_series.items()):
-        records.append({
-            "date": date_str,
-            "open": float(values["1. open"]),
-            "high": float(values["2. high"]),
-            "low": float(values["3. low"]),
-            "close": float(values["4. close"]),
-            "volume": int(values["5. volume"]),
-        })
-    return records
 
 
 # ─── Utilitaires ────────────────────────────────────────────────────────────────

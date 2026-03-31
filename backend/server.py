@@ -20,7 +20,6 @@ from dotenv import load_dotenv
 from data_collector_api import (
     get_stock_info_yfinance,
     get_historical_data_yfinance,
-    get_stock_info_alpha_vantage,
     search_stocks_yfinance,
 )
 from data_collector_scraper import scrape_stock
@@ -60,13 +59,8 @@ def search():
 @app.route("/api/stock/<symbol>", methods=["GET"])
 def get_stock(symbol: str):
     """Récupère les données actuelles d'une action (via API yfinance)."""
-    source = request.args.get("source", "yfinance")
-
     try:
-        if source == "alpha_vantage":
-            data = get_stock_info_alpha_vantage(symbol)
-        else:
-            data = get_stock_info_yfinance(symbol)
+        data = get_stock_info_yfinance(symbol)
         return jsonify(data)
     except ValueError as e:
         return jsonify({"error": str(e), "symbol": symbol}), 404
