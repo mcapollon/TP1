@@ -38,6 +38,7 @@ export default function BatchPage() {
     setNotice(null);
     setRunning(true);
     setElapsed(0);
+    stopTimer(); // defensive: never stack intervals if a prior run's timer lingers
     timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
     try {
       const result = await runBatchExport(params);
