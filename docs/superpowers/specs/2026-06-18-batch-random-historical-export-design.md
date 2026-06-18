@@ -20,6 +20,7 @@ Two structural gaps:
 - **Fetch strategy (A1):** a **bounded thread pool** (~4 workers) with small jitter, each worker calling the existing `get_historical_data_yfinance` — reuses the `curl_cffi` session, `ttl_cache`, and `with_backoff`. Rejected: pure sequential (too slow, ~3–4 min for 100); asyncio (yfinance is blocking, needs threads anyway — no gain).
 - **Skip `.info`:** the batch path needs only history, so it never calls `.info` (quoteSummary), the endpoint Yahoo throttles hardest. Rows are keyed by symbol string + history only. Roughly halves request count and 429 exposure vs the UI multi-export, which drags `StockInfo` along.
 - **Indicators default on** (`indicators=1`): richer data for model training, reusing [indicators.py](../../../backend/indicators.py) via the existing collector path. Toggleable off to halve compute/file size.
+- **Reproducible by seed:** the random symbol draw is driven by a simple integer `seed`. Same `seed` + same committed universe file → same sample, every time. If the caller omits `seed`, the server picks one and records it, so *every* export is reproducible after the fact. The effective seed is echoed in the filename, the JSON meta, and an `X-Seed` response header. The draw uses an isolated `random.Random(seed)` instance (not the global RNG) so concurrent requests can't perturb each other's samples.
 
 ## Architecture
 
@@ -42,12 +43,12 @@ Writes the deduplicated, sorted result to `backend/data/universe/us_common_stock
 
 **3. `backend/universe.py` (new)**
 - `load_universe() -> list[str]` — reads the bundled file once and caches in memory (module-level), returns the ticker list. Raises a clear error if the file is missing/empty.
-- `sample_symbols(count: int, seed: int | None = None) -> list[str]` — random sample without replacement of `count` symbols (clamped to the universe size). `seed` makes a draw reproducible.
+- `sample_symbols(count: int, seed: int) -> list[str]` — random sample without replacement of `count` symbols (clamped to the universe size), drawn from an isolated `random.Random(seed)` so the result is fully determined by `(seed, universe file)` and unaffected by global RNG state or concurrent calls.
 
 **4. `backend/batch_export.py` (new)**
 - `run_batch_export(symbols, period="max", interval="1d", indicators=True) -> tuple[list[dict], list[str]]` — fetches each symbol's history through a bounded `ThreadPoolExecutor` (max_workers ≈ 4) with small jitter between submissions, calling the existing `get_historical_data_yfinance`. Returns `(stocks, skipped)` where each `stocks` entry is `{ "symbol": SYM, "count": n, "data": [records...] }` and `skipped` lists symbols that errored or returned no rows. Per-symbol failures are caught and recorded — they never abort the batch.
 - `to_csv(stocks) -> str` — long format: header `symbol` + the canonical history columns (matching the shape of `exportMultiHistoryCSV`), one row per (symbol, date).
-- `to_json(stocks, skipped, meta) -> str` — `{ exported_at, requested, returned, skipped: [...], stocks: [...] }`.
+- `to_json(stocks, skipped, meta) -> str` — `{ exported_at, seed, requested, returned, universe_size, skipped: [...], stocks: [...] }`. (For CSV, the same meta — including `seed` — rides in response headers.)
 
 **5. `backend/server.py` — `GET /api/export/batch` (new route)**
 Query params, all optional:
@@ -55,23 +56,24 @@ Query params, all optional:
 - `format` (`csv` | `json`, default `csv`),
 - `indicators` (`0`/`1`/`true`, default `1`),
 - `period` (default `max`), `interval` (default `1d`) — validated against the same allow-lists as `/history`,
-- `seed` (int, optional).
+- `seed` (int, optional — if absent the server picks one and records it).
 
-Flow: `sample_symbols(count, seed)` → `run_batch_export(...)` → serialize in the requested format → return as a file download (`Content-Disposition: attachment; filename=batch_<count>_<timestamp>.<ext>`). The skipped list is surfaced in the JSON body and in an `X-Skipped` / `X-Returned` response header (so a CSV caller still learns about skips).
+Flow: resolve the effective `seed` (provided, else generated) → `sample_symbols(count, seed)` → `run_batch_export(...)` → serialize in the requested format → return as a file download (`Content-Disposition: attachment; filename=batch_<count>_seed<seed>_<timestamp>.<ext>`). The effective seed is echoed in the filename, the JSON meta, and an `X-Seed` header. The skipped list is surfaced in the JSON body and in `X-Skipped` / `X-Returned` headers (so a CSV caller still learns about skips and the seed).
 
 ## Data flow
 
 ```
 GET /api/export/batch?count=100&format=csv&indicators=1[&seed=42]
-  -> sample_symbols(100, seed)        from bundled universe (cached in memory)
+  -> seed = provided ? provided : generate_and_record()
+  -> sample_symbols(100, seed)        random.Random(seed) over bundled universe (cached)
   -> run_batch_export(symbols, "max", "1d", indicators=True)
        ThreadPool(4) + jitter:
          get_historical_data_yfinance(sym, "max", "1d", indicators)   [per symbol]
            (reuses curl_cffi session + ttl_cache + with_backoff; .info NOT called)
        per-symbol error/empty -> skipped[]   (batch continues)
   -> to_csv / to_json
-  -> file download (Content-Disposition: attachment)
-     + X-Returned / X-Skipped headers; skipped[] in JSON body
+  -> file download: batch_<count>_seed<seed>_<timestamp>.<ext>
+     + X-Seed / X-Returned / X-Skipped headers; seed + skipped[] in JSON body
 ```
 
 ## Error handling
@@ -82,6 +84,13 @@ GET /api/export/batch?count=100&format=csv&indicators=1[&seed=42]
 - **Zero symbols returned** (everything skipped) → 200 with empty `stocks`, full `skipped` list, and a warning field, so the caller sees what happened rather than an opaque empty file.
 - **Invalid `period`/`interval`** → 400, reusing the `/history` allow-lists.
 
+## Reproducibility
+
+The `seed` makes the **symbol selection** deterministic: `(seed, universe file)` fully determines which tickers are drawn. Re-running with the same seed reproduces the same set. Honest limits, stated so the guarantee isn't oversold:
+
+- **Universe-file dependent.** Regenerating `us_common_stocks.txt` (via `build_universe.py`) can change the list and therefore the sample for a given seed. The committed file is the reproducibility anchor; `universe_size` is recorded in the meta as a lightweight mismatch signal. (A future option: record a short content hash of the universe file in the meta.)
+- **History values come from Yahoo, not the seed.** Past daily values for a given date are effectively stable at the source, but the series keeps extending as new trading days accrue, and providers occasionally restate. So the seed reproduces *which symbols and their dates*, not a byte-identical file across time. For a frozen dataset, keep the produced export file.
+
 ## Throughput expectations
 
 Bounded pool (≈4 workers) + per-symbol backoff. ~100 lifetime-daily symbols ≈ 1–2 minutes wall-clock; many universe symbols are thin/illiquid and may skip quickly. The ≤150 cap keeps a synchronous request inside reasonable HTTP-timeout limits. If larger batches are needed later, an async job mode is the documented next step (out of scope here).
@@ -91,7 +100,8 @@ Bounded pool (≈4 workers) + per-symbol backoff. ~100 lifetime-daily symbols �
 No automated test harness in this project; verification is manual via the backend venv plus a live endpoint check.
 
 - **Builder:** run `python build_universe.py` once → file exists, has thousands of lines, spot-check that obvious warrants/units/preferreds (e.g. symbols ending in `W`, `U`, `-P...`) and ETFs are absent.
-- **Sampler (venv python):** `sample_symbols(5, seed=42)` twice → identical lists (reproducible); `len(sample_symbols(100))` == 100; sampling more than the universe size clamps without error.
+- **Sampler (venv python):** `sample_symbols(5, 42)` twice → identical lists; `sample_symbols(5, 42) != sample_symbols(5, 43)` (seed actually varies the draw); `len(sample_symbols(100, 1))` == 100; sampling more than the universe size clamps without error.
+- **Endpoint reproducibility:** `curl '/api/export/batch?count=5&seed=7&format=json'` twice → identical `stocks` symbol set + identical `seed` in body; omitting `seed` → response still carries a concrete `X-Seed` / meta `seed` that, replayed, yields the same symbol set.
 - **Batch core (venv python):** `run_batch_export(["AAPL","MSFT","NODATA_XYZ"], "1mo", "1d", indicators=True)` → AAPL/MSFT present with rows + indicator columns; `NODATA_XYZ` in `skipped`; never raises.
 - **Endpoint:** `curl '/api/export/batch?count=5&format=csv&seed=1'` → CSV file with a `symbol` column and multiple symbols' rows; `X-Returned`/`X-Skipped` headers present. `format=json` → valid JSON with `stocks[]` + `skipped[]`. A small `count` keeps the manual test fast.
 
