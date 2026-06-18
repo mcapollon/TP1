@@ -32,6 +32,10 @@ from scheduler import (
     collect_job,
 )
 from robots_checker import check_robots_txt, SITES_TO_CHECK
+import random as _random
+from flask import Response
+from universe import sample_symbols, load_universe
+from batch_export import run_batch_export, to_csv, to_json
 
 load_dotenv()
 
@@ -109,6 +113,80 @@ def get_history(symbol: str):
         })
     except Exception as e:
         return jsonify({"error": str(e), "symbol": symbol}), 500
+
+
+# ─── Route: Export par lot (échantillon aléatoire) ──────────────────────────────
+
+@app.route("/api/export/batch", methods=["GET"])
+def export_batch():
+    """
+    Échantillonne `count` symboles aléatoires de l'univers et renvoie leur
+    historique combiné (téléchargeable). Reproductible via `seed`.
+    Query params: count(<=150), format(csv|json), indicators(0/1),
+                  period, interval, seed(optionnel).
+    """
+    allowed_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
+    allowed_intervals = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
+
+    try:
+        count = int(request.args.get("count", "100"))
+    except ValueError:
+        return jsonify({"error": "count must be an integer"}), 400
+    count = max(1, min(count, 150))
+
+    fmt = request.args.get("format", "csv").lower()
+    if fmt not in ("csv", "json"):
+        return jsonify({"error": "format must be csv or json"}), 400
+
+    # Indicators on by default for batch export (training-data use case);
+    # note this differs from /history, which defaults indicators off.
+    indicators = request.args.get("indicators", "1") in ("1", "true", "True")
+    period = request.args.get("period", "max")
+    interval = request.args.get("interval", "1d")
+    if period not in allowed_periods:
+        return jsonify({"error": f"Invalid period. Allowed: {allowed_periods}"}), 400
+    if interval not in allowed_intervals:
+        return jsonify({"error": f"Invalid interval. Allowed: {allowed_intervals}"}), 400
+
+    seed_arg = request.args.get("seed")
+    try:
+        seed = int(seed_arg) if seed_arg is not None else _random.randint(0, 2_147_483_647)
+    except ValueError:
+        return jsonify({"error": "seed must be an integer"}), 400
+
+    # A missing/empty universe file raises here; surface it as a clean JSON
+    # error (pointing at build_universe.py) rather than an HTML 500 traceback.
+    try:
+        universe_size = len(load_universe())
+        symbols = sample_symbols(count, seed)
+        stocks, skipped = run_batch_export(symbols, period, interval, indicators)
+    except (FileNotFoundError, ValueError) as e:
+        return jsonify({"error": str(e)}), 500
+
+    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    meta = {
+        "seed": seed,
+        "requested": len(symbols),
+        "returned": len(stocks),
+        "universe_size": universe_size,
+    }
+    headers = {
+        "X-Seed": str(seed),
+        "X-Returned": str(len(stocks)),
+        "X-Skipped": str(len(skipped)),
+        "Content-Disposition": f"attachment; filename=batch_{count}_seed{seed}_{ts}.{fmt}",
+    }
+    # All sampled symbols failed/returned nothing: make the empty result explicit
+    # so the caller doesn't mistake it for a silent empty file (HTTP is still 200).
+    if not stocks:
+        meta["warning"] = "All sampled symbols were skipped (no data returned)."
+        headers["X-Warning"] = meta["warning"]
+
+    if fmt == "json":
+        body = to_json(stocks, skipped, meta)
+        return Response(body, mimetype="application/json", headers=headers)
+    body = to_csv(stocks, indicators)
+    return Response(body, mimetype="text/csv", headers=headers)
 
 
 # ─── Routes: Agent IA (Approche 2) ──────────────────────────────────────────────
