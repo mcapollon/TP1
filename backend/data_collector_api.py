@@ -52,39 +52,74 @@ def _clean(value, digits=2):
 
 # ─── yfinance ───────────────────────────────────────────────────────────────────
 
+def _fast_get(fast_info, attr):
+    """Lit un attribut de FastInfo sans lever (certains attrs lèvent si absents)."""
+    try:
+        return getattr(fast_info, attr, None)
+    except Exception:
+        return None
+
+
+def _name_from_search(symbol: str):
+    """Récupère le nom de la société via l'API de recherche (endpoint non bloqué)."""
+    try:
+        results = search_stocks_yfinance(symbol)
+        for r in results:
+            if r.get("symbol", "").upper() == symbol.upper():
+                return r.get("name")
+        if results:
+            return results[0].get("name")
+    except Exception:
+        pass
+    return None
+
+
 @ttl_cache()
 @with_backoff()
 def get_stock_info_yfinance(symbol: str) -> dict:
-    """Récupère les informations complètes d'une action via yfinance."""
-    ticker = make_ticker(symbol)
-    info = ticker.info
+    """Récupère les informations d'une action via yfinance.
 
-    # Validate that this is a real stock
-    price = info.get("currentPrice") or info.get("regularMarketPrice")
-    name = info.get("longName") or info.get("shortName")
+    Source principale : `ticker.fast_info` — endpoint léger qui reste accessible
+    depuis une IP datacenter. L'endpoint `.info` (quoteSummary) est celui que
+    Yahoo limite le plus agressivement (429 « Too Many Requests » en production) :
+    on l'utilise donc en enrichissement « best-effort » qui ne doit JAMAIS faire
+    échouer la cotation. Les fondamentaux manquent gracieusement si `.info` échoue.
+    """
+    ticker = make_ticker(symbol)
+    fi = ticker.fast_info
+
+    # Enrichissement best-effort. Un 429 ici => on garde fast_info seul.
+    info: dict = {}
+    try:
+        info = ticker.info or {}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[yfinance] .info indisponible pour {symbol} ({exc}); repli sur fast_info.")
+
+    price = _fast_get(fi, "last_price") or info.get("currentPrice") or info.get("regularMarketPrice")
+    prev_close = _fast_get(fi, "previous_close") or info.get("previousClose")
+    name = info.get("longName") or info.get("shortName") or _name_from_search(symbol)
+
+    # Valide qu'il s'agit d'une vraie action
     if not price and not name:
         raise ValueError(f"Aucune action trouvée pour le symbole « {symbol.upper()} ». Vérifiez le symbole et réessayez.")
 
     return {
         "symbol": symbol.upper(),
-        "name": info.get("longName") or info.get("shortName", "N/A"),
-        "current_price": info.get("currentPrice") or info.get("regularMarketPrice"),
-        "previous_close": info.get("previousClose"),
-        "open": info.get("open") or info.get("regularMarketOpen"),
-        "day_high": info.get("dayHigh") or info.get("regularMarketDayHigh"),
-        "day_low": info.get("dayLow") or info.get("regularMarketDayLow"),
-        "volume": info.get("volume") or info.get("regularMarketVolume"),
-        "market_cap": info.get("marketCap"),
+        "name": name or "N/A",
+        "current_price": price,
+        "previous_close": prev_close,
+        "open": _fast_get(fi, "open") or info.get("open") or info.get("regularMarketOpen"),
+        "day_high": _fast_get(fi, "day_high") or info.get("dayHigh") or info.get("regularMarketDayHigh"),
+        "day_low": _fast_get(fi, "day_low") or info.get("dayLow") or info.get("regularMarketDayLow"),
+        "volume": _fast_get(fi, "last_volume") or info.get("volume") or info.get("regularMarketVolume"),
+        "market_cap": _fast_get(fi, "market_cap") or info.get("marketCap"),
         "pe_ratio": info.get("trailingPE"),
         "dividend_yield": info.get("dividendYield"),
-        "fifty_two_week_high": info.get("fiftyTwoWeekHigh"),
-        "fifty_two_week_low": info.get("fiftyTwoWeekLow"),
-        "change_percent": _calc_change_percent(
-            info.get("currentPrice") or info.get("regularMarketPrice"),
-            info.get("previousClose"),
-        ),
-        "currency": info.get("currency", "USD"),
-        "exchange": info.get("exchange", "N/A"),
+        "fifty_two_week_high": _fast_get(fi, "year_high") or info.get("fiftyTwoWeekHigh"),
+        "fifty_two_week_low": _fast_get(fi, "year_low") or info.get("fiftyTwoWeekLow"),
+        "change_percent": _calc_change_percent(price, prev_close),
+        "currency": _fast_get(fi, "currency") or info.get("currency", "USD"),
+        "exchange": _fast_get(fi, "exchange") or info.get("exchange", "N/A"),
         "sector": info.get("sector", "N/A"),
         "industry": info.get("industry", "N/A"),
         "beta": info.get("beta"),
@@ -95,8 +130,8 @@ def get_stock_info_yfinance(symbol: str) -> dict:
         "return_on_equity": info.get("returnOnEquity"),
         "revenue": info.get("totalRevenue"),
         "ebitda": info.get("ebitda"),
-        "shares_outstanding": info.get("sharesOutstanding"),
-        "avg_volume": info.get("averageVolume"),
+        "shares_outstanding": _fast_get(fi, "shares") or info.get("sharesOutstanding"),
+        "avg_volume": info.get("averageVolume") or _fast_get(fi, "three_month_average_volume"),
         "fifty_two_week_change": info.get("52WeekChange") or info.get("fiftyTwoWeekChange"),
         "book_value": info.get("bookValue"),
         "timestamp": datetime.now().isoformat(),
