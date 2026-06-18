@@ -13,6 +13,7 @@ Données collectées :
 
 import os
 import json
+import math
 import time
 from datetime import datetime, timedelta
 
@@ -20,11 +21,34 @@ import yfinance as yf
 import requests
 import pandas as pd
 from dotenv import load_dotenv
+from indicators import add_indicators
 
 load_dotenv()
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Per-indicator rounding precision (column name -> decimal places).
+INDICATOR_PRECISION = {
+    "return": 6, "log_return": 6, "volume_change": 6, "volatility_20": 6,
+    "rsi_14": 2, "stoch_k": 2, "stoch_d": 2,
+    "sma_20": 2, "sma_50": 2, "ema_12": 2, "ema_26": 2,
+    "macd": 4, "macd_signal": 4, "macd_hist": 4,
+    "bb_upper": 2, "bb_mid": 2, "bb_lower": 2, "atr_14": 4, "obv": 0,
+}
+
+
+def _clean(value, digits=2):
+    """Round a numeric value, converting None/NaN/inf to None for JSON."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return round(f, digits)
 
 
 # ─── yfinance ───────────────────────────────────────────────────────────────────
@@ -62,32 +86,63 @@ def get_stock_info_yfinance(symbol: str) -> dict:
         "exchange": info.get("exchange", "N/A"),
         "sector": info.get("sector", "N/A"),
         "industry": info.get("industry", "N/A"),
+        "beta": info.get("beta"),
+        "trailing_eps": info.get("trailingEps"),
+        "forward_pe": info.get("forwardPE"),
+        "price_to_book": info.get("priceToBook"),
+        "profit_margins": info.get("profitMargins"),
+        "return_on_equity": info.get("returnOnEquity"),
+        "revenue": info.get("totalRevenue"),
+        "ebitda": info.get("ebitda"),
+        "shares_outstanding": info.get("sharesOutstanding"),
+        "avg_volume": info.get("averageVolume"),
+        "fifty_two_week_change": info.get("52WeekChange") or info.get("fiftyTwoWeekChange"),
+        "book_value": info.get("bookValue"),
         "timestamp": datetime.now().isoformat(),
         "source": "yfinance",
     }
 
 
 def get_historical_data_yfinance(
-    symbol: str, period: str = "1mo", interval: str = "1d"
+    symbol: str, period: str = "1mo", interval: str = "1d", indicators: bool = False
 ) -> list[dict]:
     """
-    Récupère les données historiques.
+    Récupère les données historiques (prix bruts + clôture ajustée + actions
+    sur titres). Si indicators=True, ajoute les indicateurs techniques.
+
     period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
     interval: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
     """
     ticker = yf.Ticker(symbol)
-    hist = ticker.history(period=period, interval=interval)
+    # auto_adjust=False -> raw OHLC + a separate 'Adj Close' column, plus
+    # 'Dividends' and 'Stock Splits'.
+    hist = ticker.history(period=period, interval=interval, auto_adjust=False)
+
+    if indicators and not hist.empty:
+        try:
+            hist = add_indicators(hist)
+        except Exception as exc:  # degrade gracefully — export base columns
+            print(f"[indicators] computation failed for {symbol}: {exc}")
+            indicators = False
 
     records = []
     for date, row in hist.iterrows():
-        records.append({
+        volume = row["Volume"]
+        record = {
             "date": date.isoformat(),
-            "open": round(row["Open"], 2),
-            "high": round(row["High"], 2),
-            "low": round(row["Low"], 2),
-            "close": round(row["Close"], 2),
-            "volume": int(row["Volume"]),
-        })
+            "open": _clean(row["Open"]),
+            "high": _clean(row["High"]),
+            "low": _clean(row["Low"]),
+            "close": _clean(row["Close"]),
+            "adj_close": _clean(row["Adj Close"]),
+            "volume": int(volume) if pd.notna(volume) else None,
+            "dividends": _clean(row.get("Dividends", 0.0), 4),
+            "stock_splits": _clean(row.get("Stock Splits", 0.0), 4),
+        }
+        if indicators:
+            for col, digits in INDICATOR_PRECISION.items():
+                record[col] = _clean(row.get(col), digits)
+        records.append(record)
     return records
 
 
