@@ -7,6 +7,8 @@ Collecte des données fraîches à chaque exécution.
 
 import os
 import json
+import time
+import random
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -34,7 +36,7 @@ def collect_job():
     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Collecte planifiée en cours...")
 
     batch = []
-    for symbol in DEFAULT_WATCHLIST:
+    for i, symbol in enumerate(DEFAULT_WATCHLIST):
         try:
             # Utilise l'API yfinance (plus fiable que le scraping)
             data = get_stock_info_yfinance(symbol)
@@ -43,6 +45,10 @@ def collect_job():
         except Exception as e:
             print(f"  {symbol}: Erreur - {e}")
             batch.append({"symbol": symbol, "error": str(e), "timestamp": datetime.now().isoformat()})
+
+        # Étaler les requêtes : évite la rafale de N appels qui déclenche le 429.
+        if i < len(DEFAULT_WATCHLIST) - 1:
+            time.sleep(random.uniform(1.5, 3.5))
 
     collected_data = batch
 

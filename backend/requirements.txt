@@ -1,6 +1,8 @@
-yfinance
+yfinance>=0.2.54
 beautifulsoup4
 requests
+requests-cache
+curl_cffi
 pandas
 flask
 flask-cors

@@ -14,14 +14,13 @@ Données collectées :
 import os
 import json
 import math
-import time
 from datetime import datetime, timedelta
 
 import yfinance as yf
-import requests
 import pandas as pd
 from dotenv import load_dotenv
 from indicators import add_indicators
+from yf_session import make_ticker, search_session, ttl_cache, with_backoff
 
 load_dotenv()
 
@@ -53,9 +52,11 @@ def _clean(value, digits=2):
 
 # ─── yfinance ───────────────────────────────────────────────────────────────────
 
+@ttl_cache()
+@with_backoff()
 def get_stock_info_yfinance(symbol: str) -> dict:
     """Récupère les informations complètes d'une action via yfinance."""
-    ticker = yf.Ticker(symbol)
+    ticker = make_ticker(symbol)
     info = ticker.info
 
     # Validate that this is a real stock
@@ -103,6 +104,8 @@ def get_stock_info_yfinance(symbol: str) -> dict:
     }
 
 
+@ttl_cache()
+@with_backoff()
 def get_historical_data_yfinance(
     symbol: str, period: str = "1mo", interval: str = "1d", indicators: bool = False
 ) -> list[dict]:
@@ -113,7 +116,7 @@ def get_historical_data_yfinance(
     period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
     interval: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
     """
-    ticker = yf.Ticker(symbol)
+    ticker = make_ticker(symbol)
     # auto_adjust=False -> raw OHLC + a separate 'Adj Close' column, plus
     # 'Dividends' and 'Stock Splits'.
     hist = ticker.history(period=period, interval=interval, auto_adjust=False)
@@ -162,7 +165,7 @@ def search_stocks_yfinance(query: str) -> list[dict]:
             "quotesQueryId": "tss_match_phrase_query",
         }
         headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, params=params, headers=headers, timeout=5)
+        resp = search_session.get(url, params=params, headers=headers, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
             for q in data.get("quotes", []):
@@ -180,7 +183,7 @@ def search_stocks_yfinance(query: str) -> list[dict]:
     # 2) If no results from search API, try direct ticker lookup as fallback
     if not results:
         try:
-            ticker = yf.Ticker(query.upper())
+            ticker = make_ticker(query.upper())
             info = ticker.info
             price = info.get("currentPrice") or info.get("regularMarketPrice")
             if price is not None:
