@@ -138,6 +138,8 @@ def export_batch():
     if fmt not in ("csv", "json"):
         return jsonify({"error": "format must be csv or json"}), 400
 
+    # Indicators on by default for batch export (training-data use case);
+    # note this differs from /history, which defaults indicators off.
     indicators = request.args.get("indicators", "1") in ("1", "true", "True")
     period = request.args.get("period", "max")
     interval = request.args.get("interval", "1d")
@@ -152,15 +154,21 @@ def export_batch():
     except ValueError:
         return jsonify({"error": "seed must be an integer"}), 400
 
-    symbols = sample_symbols(count, seed)
-    stocks, skipped = run_batch_export(symbols, period, interval, indicators)
+    # A missing/empty universe file raises here; surface it as a clean JSON
+    # error (pointing at build_universe.py) rather than an HTML 500 traceback.
+    try:
+        universe_size = len(load_universe())
+        symbols = sample_symbols(count, seed)
+        stocks, skipped = run_batch_export(symbols, period, interval, indicators)
+    except (FileNotFoundError, ValueError) as e:
+        return jsonify({"error": str(e)}), 500
 
     ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     meta = {
         "seed": seed,
         "requested": len(symbols),
         "returned": len(stocks),
-        "universe_size": len(load_universe()),
+        "universe_size": universe_size,
     }
     headers = {
         "X-Seed": str(seed),
