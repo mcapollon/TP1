@@ -88,6 +88,7 @@ def get_history(symbol: str):
     """
     period = request.args.get("period", "1mo")
     interval = request.args.get("interval", "1d")
+    indicators = request.args.get("indicators") in ("1", "true", "True")
 
     allowed_periods = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
     allowed_intervals = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
@@ -98,7 +99,7 @@ def get_history(symbol: str):
         return jsonify({"error": f"Invalid interval. Allowed: {allowed_intervals}"}), 400
 
     try:
-        data = get_historical_data_yfinance(symbol, period=period, interval=interval)
+        data = get_historical_data_yfinance(symbol, period=period, interval=interval, indicators=indicators)
         return jsonify({
             "symbol": symbol.upper(),
             "period": period,
