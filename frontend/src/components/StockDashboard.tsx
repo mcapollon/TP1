@@ -79,6 +79,7 @@ export function StockDashboard({ symbol, onDataLoaded }: StockDashboardProps) {
     { value: "6mo", label: "6M" },
     { value: "1y", label: "1A" },
     { value: "5y", label: "5A" },
+    { value: "max", label: "Max" },
   ];
 
   return (
