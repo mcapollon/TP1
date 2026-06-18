@@ -40,7 +40,7 @@ from batch_export import run_batch_export, to_csv, to_json
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, expose_headers=["X-Seed", "X-Returned", "X-Skipped", "X-Warning", "Content-Disposition"])
 
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 
