@@ -25,13 +25,15 @@ export function PriceChart({ data, symbol }: PriceChartProps) {
     );
   }
 
-  const firstClose = data[0]?.close ?? 0;
-  const lastClose = data[data.length - 1]?.close ?? 0;
+  const firstClose = data[0]?.adj_close ?? data[0]?.close ?? 0;
+  const lastClose =
+    data[data.length - 1]?.adj_close ?? data[data.length - 1]?.close ?? 0;
   const isPositive = lastClose >= firstClose;
   const color = isPositive ? "#22c55e" : "#ef4444";
 
   const chartData = data.map((d) => ({
     ...d,
+    price: d.adj_close ?? d.close,
     date: new Date(d.date).toLocaleDateString("fr-FR", {
       month: "short",
       day: "numeric",
@@ -74,7 +76,7 @@ export function PriceChart({ data, symbol }: PriceChartProps) {
           />
           <Area
             type="monotone"
-            dataKey="close"
+            dataKey="price"
             stroke={color}
             strokeWidth={2}
             fill="url(#priceGradient)"
