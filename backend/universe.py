@@ -15,8 +15,16 @@ _universe: list[str] | None = None
 
 
 def load_universe() -> list[str]:
-    """Read and memoize the bundled ticker list. Raises if missing/empty."""
+    """Read and memoize the bundled ticker list. Raises if missing/empty.
+
+    The returned list is the shared memoized instance — callers must not mutate
+    it (it backs every subsequent sample).
+    """
     global _universe
+    # Benign check-then-act race: under Flask's threaded server two first-hit
+    # requests may both read the file, but the `_universe = [...]` store is a
+    # single atomic bytecode under CPython's GIL, so no partial list is ever
+    # observed — the worst case is one redundant read.
     if _universe is None:
         if not os.path.exists(_UNIVERSE_PATH):
             raise FileNotFoundError(
@@ -36,6 +44,6 @@ def sample_symbols(count: int, seed: int) -> list[str]:
     (seed, universe file) always yields the same list.
     """
     universe = load_universe()
-    n = max(0, min(count, len(universe)))
+    n = int(max(0, min(count, len(universe))))
     rng = random.Random(seed)
     return rng.sample(universe, n)
