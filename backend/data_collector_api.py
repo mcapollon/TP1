@@ -48,7 +48,7 @@ def _clean(value, digits=2):
         return None
     if math.isnan(f) or math.isinf(f):
         return None
-    return round(f, digits)
+    return int(round(f)) if digits == 0 else round(f, digits)
 
 
 # ─── yfinance ───────────────────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ def get_historical_data_yfinance(
             "low": _clean(row["Low"]),
             "close": _clean(row["Close"]),
             "adj_close": _clean(row["Adj Close"]),
-            "volume": int(volume) if pd.notna(volume) else None,
+            "volume": int(volume) if pd.notna(volume) and not math.isinf(volume) else None,
             "dividends": _clean(row.get("Dividends", 0.0), 4),
             "stock_splits": _clean(row.get("Stock Splits", 0.0), 4),
         }

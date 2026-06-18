@@ -60,8 +60,8 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     rs = avg_gain / avg_loss
     out["rsi_14"] = 100 - (100 / (1 + rs))
 
-    # Bollinger Bands (20, 2 std)
-    bb_mid = adj_close.rolling(window=20).mean()
+    # Bollinger Bands (20, 2 std) — reuse the already-computed SMA(20) as the mid band
+    bb_mid = out["sma_20"]
     bb_std = adj_close.rolling(window=20).std()
     out["bb_mid"] = bb_mid
     out["bb_upper"] = bb_mid + 2 * bb_std
