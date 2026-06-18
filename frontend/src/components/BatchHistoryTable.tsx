@@ -37,6 +37,7 @@ export function BatchHistoryTable({ records, onReDownload, onRemove, onClear, bu
               <th className="text-left px-4 py-2 font-medium">Seed</th>
               <th className="text-left px-4 py-2 font-medium">Count</th>
               <th className="text-left px-4 py-2 font-medium">Format</th>
+              <th className="text-left px-4 py-2 font-medium">Ind</th>
               <th className="text-left px-4 py-2 font-medium">Period</th>
               <th className="text-left px-4 py-2 font-medium">Ret/Skip</th>
               <th className="text-left px-4 py-2 font-medium">When</th>
@@ -49,6 +50,7 @@ export function BatchHistoryTable({ records, onReDownload, onRemove, onClear, bu
                 <td className="px-4 py-2 font-mono text-xs">{r.seed}</td>
                 <td className="px-4 py-2">{r.count}</td>
                 <td className="px-4 py-2 uppercase">{r.format}</td>
+                <td className="px-4 py-2">{r.indicators ? "✓" : "—"}</td>
                 <td className="px-4 py-2">{r.period}</td>
                 <td className="px-4 py-2">
                   {r.returned}/{r.skipped}
