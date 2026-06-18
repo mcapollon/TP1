@@ -33,9 +33,19 @@ OTHER_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 OUT_PATH = os.path.join(ASSETS_DIR, "us_common_stocks.txt")
 
-# Security-name keywords that mark a non-common-stock instrument.
-NAME_BLOCKLIST = (
-    "warrant", "unit", "right", "preferred", "depositary", "depository",
+# Word-boundary patterns for blocklist terms that are also common English words
+# inside legitimate company names ("unit" in "United", "right" in "Bright").
+# `s?` so plurals ("Units", "Rights", "Warrants") are still caught.
+NAME_BLOCKLIST_WORDS = (
+    re.compile(r"\bwarrants?\b"),
+    re.compile(r"\bunits?\b"),
+    re.compile(r"\brights?\b"),
+    re.compile(r"\bpreferred\b"),
+    re.compile(r"\bdepositary\b"),
+    re.compile(r"\bdepository\b"),
+)
+# Unambiguous substrings — these don't occur mid-word in normal company names.
+NAME_BLOCKLIST_SUBSTR = (
     "when issued", "when-issued", "convertible", "debenture", "notes due",
     "% note", "subordinated", " etn", "exchange-traded note",
 )
@@ -60,7 +70,9 @@ def _is_common(symbol: str, name: str) -> bool:
     if not PURE_TICKER.match(symbol):
         return False
     lname = name.lower()
-    return not any(bad in lname for bad in NAME_BLOCKLIST)
+    if any(p.search(lname) for p in NAME_BLOCKLIST_WORDS):
+        return False
+    return not any(bad in lname for bad in NAME_BLOCKLIST_SUBSTR)
 
 
 def build() -> list[str]:
