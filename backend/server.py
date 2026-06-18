@@ -176,6 +176,11 @@ def export_batch():
         "X-Skipped": str(len(skipped)),
         "Content-Disposition": f"attachment; filename=batch_{count}_seed{seed}_{ts}.{fmt}",
     }
+    # All sampled symbols failed/returned nothing: make the empty result explicit
+    # so the caller doesn't mistake it for a silent empty file (HTTP is still 200).
+    if not stocks:
+        meta["warning"] = "All sampled symbols were skipped (no data returned)."
+        headers["X-Warning"] = meta["warning"]
 
     if fmt == "json":
         body = to_json(stocks, skipped, meta)
