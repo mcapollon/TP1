@@ -28,8 +28,9 @@ INDICATOR_FIELDS = list(INDICATOR_PRECISION.keys())
 
 def _fetch_one(symbol: str, period: str, interval: str, indicators: bool):
     """Fetch one symbol's history; return (symbol, records) or (symbol, None) on failure/empty."""
-    # Jitter desynchronizes the pool's first wave of requests.
-    time.sleep(random.uniform(0.0, 0.3))
+    # Jitter desynchronizes the pool's first wave of requests. A per-call
+    # Random() instance avoids sharing the global RNG across pool workers.
+    time.sleep(random.Random().random() * 0.3)
     try:
         records = get_historical_data_yfinance(symbol, period, interval, indicators)
     except Exception as exc:  # noqa: BLE001 — one bad symbol must not kill the batch
