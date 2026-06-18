@@ -23,9 +23,10 @@ export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) 
   const [step, setStep] = useState<Step>("scope");
   const [multi, setMulti] = useState(false);
   const [dataType, setDataType] = useState<DataType>("details");
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
+  const [notice, setNotice] = useState<{ type: "error" | "warning"; text: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const exporting = exportingFormat !== null;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -46,8 +47,8 @@ export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) 
     setStep("scope");
     setMulti(false);
     setDataType("details");
-    setExporting(false);
-    setExportError(null);
+    setExportingFormat(null);
+    setNotice(null);
   }
 
   function toggleMenu() {
@@ -68,7 +69,7 @@ export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) 
   }
 
   async function handleExport(format: ExportFormat) {
-    setExportError(null);
+    setNotice(null);
 
     // "details" is not a time series — export the loaded snapshot, no fetch.
     if (dataType === "details") {
@@ -82,7 +83,7 @@ export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) 
     }
 
     // "history" / "full" — fetch full lifetime (max, daily) fresh per symbol.
-    setExporting(true);
+    setExportingFormat(format);
     try {
       if (multi && allBundles.length > 0) {
         const results = await Promise.allSettled(
@@ -98,28 +99,28 @@ export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) 
           }
         });
         if (!fresh.length) {
-          setExportError("No lifetime data could be fetched for any symbol.");
+          setNotice({ type: "error", text: "No lifetime data could be fetched for any symbol." });
           return;
         }
         exportMulti(format, fresh, dataType);
         if (skipped.length) {
-          setExportError(`Exported. Skipped (no data): ${skipped.join(", ")}`);
+          setNotice({ type: "warning", text: `Exported. Skipped (no data): ${skipped.join(", ")}` });
         } else {
           setOpen(false);
         }
       } else if (currentBundle) {
         const res = await api.getHistory(currentBundle.stock.symbol, "max", "1d");
         if (!res.data.length) {
-          setExportError(`No historical data available for ${currentBundle.stock.symbol}.`);
+          setNotice({ type: "error", text: `No historical data available for ${currentBundle.stock.symbol}.` });
           return;
         }
         exportSingle(format, currentBundle.stock, res.data, dataType);
         setOpen(false);
       }
-    } catch (e: any) {
-      setExportError(e.message || "Export failed.");
+    } catch (e: unknown) {
+      setNotice({ type: "error", text: e instanceof Error ? e.message : "Export failed." });
     } finally {
-      setExporting(false);
+      setExportingFormat(null);
     }
   }
 
@@ -215,9 +216,14 @@ export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) 
                 <span className="ml-auto text-emerald-500 normal-case font-normal">{dataLabel}</span>
               </button>
 
-              {dataType !== "details" && (
+              {dataType === "history" && (
                 <div className="px-4 py-2 bg-[#12121a] text-[11px] text-zinc-500 border-b border-[#2a2a3e]">
                   Exports full lifetime history (daily).
+                </div>
+              )}
+              {dataType === "full" && (
+                <div className="px-4 py-2 bg-[#12121a] text-[11px] text-zinc-500 border-b border-[#2a2a3e]">
+                  Exports details snapshot + full lifetime history (daily).
                 </div>
               )}
 
@@ -225,30 +231,39 @@ export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) 
                 { format: "csv" as ExportFormat, label: "CSV", desc: "Spreadsheet-compatible", Icon: FileText },
                 { format: "json" as ExportFormat, label: "JSON", desc: "Structured data format", Icon: FileJson },
                 { format: "xls" as ExportFormat, label: "Excel (XLS)", desc: "Microsoft Excel file", Icon: FileSpreadsheet },
-              ]).map((opt) => (
-                <button
-                  key={opt.format}
-                  onClick={() => handleExport(opt.format)}
-                  disabled={exporting}
-                  className="w-full flex items-center gap-3 text-left px-4 py-3 text-sm text-zinc-200 hover:bg-[#2a2a3e] transition-colors border-b border-[#2a2a3e] last:border-0 disabled:opacity-50 disabled:hover:bg-transparent"
-                >
-                  {exporting ? (
-                    <Loader2 className="w-5 h-5 text-emerald-500 shrink-0 animate-spin" />
-                  ) : (
-                    <opt.Icon className="w-5 h-5 text-emerald-500 shrink-0" />
-                  )}
-                  <div>
-                    <div className="font-medium">{opt.label}</div>
-                    <div className="text-xs text-zinc-500">
-                      {exporting ? "Fetching lifetime data…" : opt.desc}
+              ]).map((opt) => {
+                const isActive = exportingFormat === opt.format;
+                return (
+                  <button
+                    key={opt.format}
+                    onClick={() => handleExport(opt.format)}
+                    disabled={exporting}
+                    className="w-full flex items-center gap-3 text-left px-4 py-3 text-sm text-zinc-200 hover:bg-[#2a2a3e] transition-colors border-b border-[#2a2a3e] last:border-0 disabled:opacity-50 disabled:hover:bg-transparent"
+                  >
+                    {isActive ? (
+                      <Loader2 className="w-5 h-5 text-emerald-500 shrink-0 animate-spin" />
+                    ) : (
+                      <opt.Icon className="w-5 h-5 text-emerald-500 shrink-0" />
+                    )}
+                    <div>
+                      <div className="font-medium">{opt.label}</div>
+                      <div className="text-xs text-zinc-500">
+                        {isActive ? "Fetching lifetime data…" : opt.desc}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
 
-              {exportError && (
-                <div className="px-4 py-3 text-xs text-red-400 bg-red-500/10 border-t border-red-500/30">
-                  {exportError}
+              {notice && (
+                <div
+                  className={`px-4 py-3 text-xs border-t ${
+                    notice.type === "error"
+                      ? "text-red-400 bg-red-500/10 border-red-500/30"
+                      : "text-amber-400 bg-amber-500/10 border-amber-500/30"
+                  }`}
+                >
+                  {notice.text}
                 </div>
               )}
             </div>
