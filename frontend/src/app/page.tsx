@@ -5,7 +5,8 @@ import { SearchBar } from "@/components/SearchBar";
 import { StockDashboard } from "@/components/StockDashboard";
 import { ExportMenu } from "@/components/ExportMenu";
 import { StockDataBundle } from "@/lib/export";
-import { TrendingUp, X, AlertTriangle } from "lucide-react";
+import { TrendingUp, X, AlertTriangle, Layers } from "lucide-react";
+import Link from "next/link";
 
 export default function Home() {
   const [symbols, setSymbols] = useState<string[]>([]);
@@ -59,7 +60,16 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <ExportMenu currentBundle={currentBundle} allBundles={allBundles} />
+          <div className="flex items-center gap-3">
+            <Link
+              href="/batch"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1a1a2e] border border-[#2a2a3e] text-zinc-200 hover:border-blue-500 hover:text-white text-sm font-medium transition-colors"
+            >
+              <Layers className="w-4 h-4" />
+              Batch Export
+            </Link>
+            <ExportMenu currentBundle={currentBundle} allBundles={allBundles} />
+          </div>
         </div>
       </header>
 
