@@ -65,7 +65,7 @@ export async function runBatchExport(params: BatchParams): Promise<BatchRunResul
     throw new Error(err.error || `Export failed: ${res.status}`);
   }
 
-  const resolvedSeed = Number(res.headers.get("X-Seed"));
+  const resolvedSeed = Number(res.headers.get("X-Seed") ?? 0);
   const returned = Number(res.headers.get("X-Returned") ?? 0);
   const skipped = Number(res.headers.get("X-Skipped") ?? 0);
   const warning = res.headers.get("X-Warning");
