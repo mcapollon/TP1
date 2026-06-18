@@ -19,21 +19,25 @@ interface ExportMenuProps {
 type DataType = "details" | "history" | "full";
 type Step = "scope" | "data" | "columns" | "format";
 
-const COLUMN_GROUPS: { label: string; keys: string[] }[] = [
-  { label: "Prices", keys: ["open", "high", "low", "close", "adj_close", "volume"] },
-  { label: "Corporate actions", keys: ["dividends", "stock_splits"] },
-  {
-    label: "Indicators",
-    keys: [
-      "return", "log_return", "sma_20", "sma_50", "ema_12", "ema_26",
-      "macd", "macd_signal", "macd_hist", "volatility_20", "rsi_14",
-      "bb_upper", "bb_mid", "bb_lower", "atr_14", "obv", "stoch_k",
-      "stoch_d", "volume_change",
-    ],
-  },
-];
 // All selectable column keys (everything except the always-included `date`).
 const SELECTABLE_COLUMNS = HISTORY_COLUMNS.filter((c) => c !== "date");
+
+// Group membership for the picker. Anything not mapped here is an indicator.
+const GROUP_OF: Record<string, string> = {
+  open: "Prices", high: "Prices", low: "Prices", close: "Prices",
+  adj_close: "Prices", volume: "Prices",
+  dividends: "Corporate actions", stock_splits: "Corporate actions",
+};
+const GROUP_ORDER = ["Prices", "Corporate actions", "Indicators"];
+
+// Derived from HISTORY_COLUMNS so the picker can never silently drift from the
+// canonical column list; keys keep their canonical order within each group.
+const COLUMN_GROUPS: { label: string; keys: string[] }[] = GROUP_ORDER.map(
+  (label) => ({
+    label,
+    keys: SELECTABLE_COLUMNS.filter((c) => (GROUP_OF[c] ?? "Indicators") === label),
+  })
+).filter((g) => g.keys.length > 0);
 
 export function ExportMenu({ currentBundle, allBundles = [] }: ExportMenuProps) {
   const [open, setOpen] = useState(false);

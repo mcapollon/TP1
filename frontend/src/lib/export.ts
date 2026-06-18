@@ -193,13 +193,26 @@ export function exportMultiHistoryCSV(bundles: StockDataBundle[], columns?: stri
   downloadFile(csv, `history_${symbols}_${timestamp()}.csv`, "text/csv");
 }
 
-export function exportMultiStockJSON(bundles: StockDataBundle[]) {
+export function exportMultiStockJSON(bundles: StockDataBundle[], columns?: string[]) {
+  // When columns are given (history/full exports), filter each stock's history
+  // to the selection; otherwise (details export) keep the full history as-is.
+  const cols = columns && columns.length ? pickColumns(columns) : null;
   const report = {
     exported_at: new Date().toISOString(),
     stock_count: bundles.length,
     stocks: bundles.map((b) => ({
       details: b.stock,
-      historical_data: { count: b.history.length, data: b.history },
+      historical_data: {
+        count: b.history.length,
+        ...(cols ? { columns: cols } : {}),
+        data: cols
+          ? b.history.map((d) => {
+              const obj: Record<string, unknown> = {};
+              cols.forEach((c) => (obj[c] = (d as any)[c]));
+              return obj;
+            })
+          : b.history,
+      },
     })),
   };
   const json = JSON.stringify(report, null, 2);
@@ -280,14 +293,14 @@ export function exportMulti(
     else exportMultiStockXLS(bundles);
   } else if (type === "history") {
     if (format === "csv") exportMultiHistoryCSV(bundles, columns);
-    else if (format === "json") exportMultiStockJSON(bundles);
+    else if (format === "json") exportMultiStockJSON(bundles, columns);
     else exportMultiHistoryXLS(bundles, columns);
   } else {
     if (format === "csv") {
       exportMultiStockCSV(bundles);
       exportMultiHistoryCSV(bundles, columns);
     } else if (format === "json") {
-      exportMultiStockJSON(bundles);
+      exportMultiStockJSON(bundles, columns);
     } else {
       exportMultiStockXLS(bundles);
       exportMultiHistoryXLS(bundles, columns);
